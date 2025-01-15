@@ -94,11 +94,9 @@ def init_logger(config):
         handlers=[fh, sh]
     )
 
-
 def dynamic_load(config, module_path, class_name=''):
     module = importlib.import_module(module_path)
     return getattr(module, config['model'] + class_name)
-
 
 def ensure_dir(dir_path):
     """Make sure the directory exists, if it does not exist, create it.
@@ -110,8 +108,10 @@ def ensure_dir(dir_path):
         os.makedirs(dir_path)
 
 
-def dict2device(dct, device):
-    new_dct = {}
-    for k in dct:
-        new_dct[k] = dct[k].to(device)
-    return new_dct
+def dict2device(data, device):
+    for k, v in data.items():
+        if isinstance(v, dict):
+            data[k] = dict2device(v, device)
+        elif isinstance(v, torch.Tensor):
+            data[k] = v.to(device)
+    return data

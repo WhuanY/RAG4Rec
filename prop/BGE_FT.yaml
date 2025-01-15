@@ -1,0 +1,23 @@
+# Data
+train_ds_path: "dataset/processed_train.csv"
+valid_ds_path: "dataset/processed_valid.csv"
+test_ds_path: "dataset/processed_test.csv"
+ratio: 0.1
+
+# Model
+bge_path: "/media/wuyuhuan/bge-small-zh"
+wd_embedding_size: 128
+user_embedding_size: 16
+bert_embedding_size: 768
+hidden_size: 64
+dropout: 0.2
+num_heads: 1
+beta: 0.2
+k: 8
+
+# Training
+learning_rate: 0.0003
+
+# General
+train_batch_size: 2048
+eval_batch_size: 4096
