@@ -15,7 +15,7 @@ import random
 from tqdm import tqdm
 
 
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 logging.info(f"Usable GPU: {torch.cuda.device_count()}")  
 tokenizer = AutoTokenizer.from_pretrained(bge_path)
 
@@ -308,9 +308,11 @@ class BGE_FTModel(torch.nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
         
-        logging.info(f"Frozing Parameters...")
-        self.frozen_target_parameters()
-        logging.info(f"Model Initialized.")
+        # logging.info(f"Frozing Parameters...")
+        # self.frozen_target_parameters()
+        # logging.info(f"Model Initialized.")
+
+        self.print_trainable_parameters()
 
         self.timing_stats = defaultdict(list)  # For storing timing information
 
