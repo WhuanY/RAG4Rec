@@ -1,0 +1,22 @@
+# Data
+tokenizer_path: "/media/wuyuhuan/bge-small-zh"
+ratio: 0.1
+
+# Model
+bge_path: "/media/wuyuhuan/bge-small-zh"
+vocab_size: 21128
+wd_embedding_size: 128
+user_embedding_size: 16
+bert_embedding_size: 768
+hidden_size: 64
+dropout: 0.2
+num_heads: 1
+beta: 0.2
+k: 8
+
+# Training
+learning_rate: 0.0003
+
+# General
+train_batch_size: 2048
+eval_batch_size: 4096
