@@ -10,3 +10,6 @@ log/
 *.pyw
 *.pyz
 __pycache__/
+
+#vscode
+.vscode/
