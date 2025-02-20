@@ -19,6 +19,7 @@ num_workers: 4
 pin_memory: True
 
 # General
+lode_ratio: 0.1 # the dataset ratio for loading. 1 means all data will be loaded.
 checkpoint_dir: ./saved/
 dataset_path: ./dataset/
 loss_decimal_place: 4

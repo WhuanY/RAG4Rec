@@ -94,9 +94,21 @@ def init_logger(config):
         handlers=[fh, sh]
     )
 
-def dynamic_load(config, module_path, class_name=''):
+def dynamic_load(config, module_path, base_class):
+    """
+    Load the required class based on the model name and base class.
+    
+    Args:
+        config (dict): Configuration dictionary containing the model name.
+        module_path (str): Path to the module containing the class.
+        base_class (str): The base class type (e.g., "Dataset", "Dataloader", "Model").
+    
+    Returns:
+        class: The dynamically loaded class.
+    """
     module = importlib.import_module(module_path)
-    return getattr(module, config['model'] + class_name)
+    class_name = base_class + '_' + config['model']
+    return getattr(module, class_name)
 
 def ensure_dir(dir_path):
     """Make sure the directory exists, if it does not exist, create it.
