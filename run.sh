@@ -1,0 +1,1 @@
+nohup python bone.py > output.log 2>&1 &

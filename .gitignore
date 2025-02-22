@@ -9,4 +9,8 @@ log/
 *.pyd
 *.pyw
 *.pyz
+BGE-FT.ipynb
 __pycache__/
+
+#vscode
+.vscode/

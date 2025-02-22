@@ -117,7 +117,6 @@ class Pool_Text(Pool_PJF):
     def __repr__(self):
         return self.__str__()
     
-
     # functions below are utility functions
     def _clean_job_text(self, text):
         illegal_set = ',.;?!~[]\'"@#$%^&*()-_=+{}\\`～·！¥（）—「」【】|、“”《<》>？，。…：'   # 定义非法字符
@@ -167,7 +166,6 @@ class Pool_PJFNN(Pool_Text):
         super().__init__(config)
         # split original texts
         self._split_jobs()
-        self._split_geek()
     
     def _split_jobs(self):
         """
@@ -177,12 +175,6 @@ class Pool_PJFNN(Pool_Text):
             job_text = self.__clean_job_text(job_text)
             job_items = self.__split_job_sent(job_text) 
             self.set_texts('job', job_id, job_items)
-    
-    def _split_geek(self):
-        """
-        Split the cv sentences into list of sentences.
-        """
-        pass
 
     def __clean_job_text(self, text):
         illegal_set = ',.;?!~[]\'"@#$%^&*()-_=+{}\\`～·！¥（）—「」【】|、“”《<》>？，。…：'   # 定义非法字符
@@ -202,11 +194,12 @@ class Pool_PJFNN(Pool_Text):
                 for ttt in re.split('(?:^1[、，])', tt):   # 1、
                     for tttt in re.split('(?:\([0-9]\))', ttt):   # (1)
                         ans += re.split('(?:[。；…●])', tttt)
-        
-        return [_.strip()[:max_items] for _ in ans if len(_.strip()) > 0] # 限制一个工作描述最多20个item
+                        
+        ans = ans[:max_items]
+        return [_.strip() for _ in ans if len(_.strip()) > 0] 
 
 if __name__ == "__main__":
-    test_config = {'dataset_path': '/root/RAG4Rec/dataset'}
+    test_config = {'dataset_path': '~/RAG4Rec/dataset'}
     print("Testing PJFNN")
     pjfnnpool = Pool_PJFNN(test_config)
     print(pjfnnpool)

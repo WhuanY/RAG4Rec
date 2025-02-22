@@ -1,14 +1,15 @@
-import argparse
-from logging import getLogger
-
 from config import Config
+from logging import getLogger
 from data.dataloader import construct_dataloader
 from util import init_seed, init_logger, dynamic_load
 from trainer import Trainer
+import argparse
+
 
 def main(model, config_dict=None, saved=True):
     # running envs initialization
     config = Config(model, config_dict=config_dict)
+    import torch
     init_seed(42, True)
     init_logger(config)
     logger = getLogger()
@@ -25,7 +26,7 @@ def main(model, config_dict=None, saved=True):
     train_loader, valid_loader, test_loader = construct_dataloader(config, [train_ds, valid_ds, test_ds])
     # model loading
     logger.info('Model loading...')
-    model = dynamic_load(config, 'model', "Model")(config).to(f"cuda:{config['gpu_id']}")
+    model = dynamic_load(config, 'model', "Model")(config).to(config['device'])
     logger.info('Model loading finished.')
     print(model)
 

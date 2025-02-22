@@ -1,22 +1,25 @@
+# -----Data Preparation-----
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 bge_path = "/media/wuyuhuan/bge-small-zh"
 logging.info(f"Using BGE model from {bge_path}")
 import torch
+from torch.amp import autocast, GradScaler
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.clip_grad import clip_grad_norm_
 logging.info(f"Torch Imported. Using PyTorch version {torch.__version__}")
 from transformers import AutoTokenizer, AutoModel
+
 import pandas as pd
 import numpy as np
 import random
 from tqdm import tqdm
-
+from peft import LoraModel, LoraConfig
 
 device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-logging.info(f"Usable GPU: {torch.cuda.device_count()}")  
+logging.info(f"Usable GPU: {torch.cuda.device_count()}, device using: {device}")  
 tokenizer = AutoTokenizer.from_pretrained(bge_path)
 
 def same_seed(seed):
@@ -69,6 +72,10 @@ train_dataset = BGE_FTDataset('train', 'dataset/processed_train.csv', tokenizer,
 valid_dataset = BGE_FTDataset('valid', "dataset/processed_valid.csv", tokenizer,ratio=1)
 test_dataset = BGE_FTDataset('test', "dataset/processed_test.csv", tokenizer, ratio=1)
 
+# train_dataset[0]
+# valid_dataset[0]
+# test_dataset[0]
+
 def collate_fn(batch, tokenizer):
     user_ids = [item['user_id'] for item in batch]
     job_ids = [item['job_id'] for item in batch]
@@ -92,9 +99,42 @@ def collate_fn(batch, tokenizer):
         'label': torch.tensor(labels, dtype=torch.float32)
     }
 
+# Create dataloaders with parallel processing
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=256,
+    num_workers=2,
+    shuffle=True,
+    collate_fn=lambda x: collate_fn(x, tokenizer),
+    pin_memory=True,
+    persistent_workers=True
+)
+
+valid_loader = DataLoader(
+    valid_dataset,
+    batch_size=256,
+    num_workers=2,
+    shuffle=False,
+    collate_fn=lambda x: collate_fn(x, tokenizer),
+    pin_memory=True,
+    persistent_workers=True
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=256,
+    num_workers=2,
+    shuffle=False,
+    collate_fn=lambda x: collate_fn(x, tokenizer),
+    pin_memory=True,
+    persistent_workers=True
+)
+
+# -----Evaluator-----
 from typing import List
 from sklearn.metrics import f1_score, accuracy_score, roc_auc_score, log_loss
-
+from typing import List
+from sklearn.metrics import f1_score, accuracy_score, roc_auc_score, log_loss
 class Evaluator:
     """
     Evaluator for the BGE-FT model.
@@ -286,6 +326,7 @@ class Evaluator:
             res += '\n\t{}:\t{:.4f}'.format(metric, result[metric])
         return res
     
+#-----Model Architecture-----
 from collections import defaultdict
 
 class BGE_FTModel(torch.nn.Module):
@@ -299,18 +340,21 @@ class BGE_FTModel(torch.nn.Module):
             nn.Linear(256, 16),
             nn.ReLU(),
             nn.Linear(16, 1),
-            nn.Sigmoid()
         ).to(device)
 
-        self.loss_fn = nn.BCELoss()
+        self.loss_fn = nn.BCEWithLogitsLoss()
         # xavier initialization for predictor
         for m in self.predictor:
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
+
+        config = LoraConfig(r=4, lora_alpha=4, target_modules=["query", "key"])
+        self.text_matcher = LoraModel(self.text_matcher, config, adapter_name="default").to(device)
         
-        logging.info(f"Frozing Parameters...")
-        self.frozen_target_parameters()
-        logging.info(f"Model Initialized.")
+        # logging.info(f"Frozing Parameters...")
+        # self.frozen_target_parameters()
+        # logging.info(f"Model Initialized.")
+        self.print_trainable_parameters()
 
         self.timing_stats = defaultdict(list)  # For storing timing information
 
@@ -375,45 +419,16 @@ class BGE_FTModel(torch.nn.Module):
         """Reset timing statistics"""
         self.timing_stats.clear()
 
-# Create dataloaders with parallel processing
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=512,
-    num_workers=2,
-    shuffle=True,
-    collate_fn=lambda x: collate_fn(x, tokenizer),
-    pin_memory=True,
-    persistent_workers=True
-)
-
-valid_loader = DataLoader(
-    valid_dataset,
-    batch_size=512,
-    num_workers=2,
-    shuffle=False,
-    collate_fn=lambda x: collate_fn(x, tokenizer),
-    pin_memory=True,
-    persistent_workers=True
-)
-
-test_loader = DataLoader(
-    test_dataset,
-    batch_size=512,
-    num_workers=2,
-    shuffle=False,
-    collate_fn=lambda x: collate_fn(x, tokenizer),
-    pin_memory=True,
-    persistent_workers=True
-)
-
+#-----Trainer-----
 class Trainer(object):
     def __init__(self, model, train_dataloader, valid_dataloader, test_dataloader, optimizer, eval_step, verbose=True):
-        self.model = model
         self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
         self.test_dataloader = test_dataloader
         self.clip_grad_norm = None
+        self.model = model
         self.optimizer = optimizer
+        self.scaler = GradScaler() # for mixed precision training 
         self.eval_step = 1
 
         self.verbose = verbose
@@ -497,6 +512,8 @@ class Trainer(object):
         total_loss = 0
         total_batches = len(train_dataloader)
         
+        pbar = tqdm(enumerate(train_dataloader), total=total_batches, desc=f"Epoch {epoch_idx} Train")
+
         for step, sample in enumerate(train_dataloader):
             # Create new events for each iteration
             start = torch.cuda.Event(enable_timing=True)
@@ -510,33 +527,37 @@ class Trainer(object):
             self.optimizer.zero_grad()
             
             # 模型前向传播
-            output = self.model(sample)
-            forward_end.record()
-            # 损失计算
-            loss = self.model.calculate_loss(output, label)
-            loss_end.record()
-            # 反向传播
-            loss.backward()
+            with autocast(device_type=str(device),dtype=torch.float16):
+                output = self.model(sample)
+                forward_end.record()
+                # 损失计算
+                loss = self.model.calculate_loss(output, label)
+                loss_end.record()
+            # Use scaler for backward pass
+            self.scaler.scale(loss).backward() 
             backward_end.record()
             
             # 梯度裁剪（如果启用）
             if self.clip_grad_norm:
+                self.scaler.unscale_(self.optimizer)
                 clip_grad_norm_(self.model.parameters(), **self.clip_grad_norm)
             
             # 优化器步骤
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             torch.cuda.synchronize()
 
             # 更新进度条显示
             forward_elapsed_time = start.elapsed_time(forward_end)
             loss_elapsed_time = forward_end.elapsed_time(loss_end)
             backward_elapsed_time = loss_end.elapsed_time(backward_end)
-            # 有1/100 的概率打印信息
             if (step + 1) % 100 == 0:
                 logging.info(f"Epoch {epoch_idx} Step {step + 1}/{total_batches} | loss: {loss.item():.4f} | forward: {forward_elapsed_time:.2f} ms | loss: {loss_elapsed_time:.2f} ms | backward: {backward_elapsed_time:.2f} ms")
+            # pbar.set_postfix_str(f"loss: {loss.item():.4f} | forward: {forward_elapsed_time:.2f} ms | loss: {loss_elapsed_time:.2f} ms | backward: {backward_elapsed_time:.2f} ms")
+            
             total_loss += loss.item()
             self._check_nan(loss)
-
+            
         return total_loss / total_batches
     
     @torch.no_grad()
@@ -548,6 +569,7 @@ class Trainer(object):
         self.model.eval()
         total_loss = 0
         total_batches = len(valid_dataloader)
+        pbar = tqdm(enumerate(valid_dataloader), total=total_batches, desc=f"Epoch {epoch_idx} Valid")
 
         # calculate loss on validation set
         for step, sample in enumerate(valid_dataloader):
@@ -556,7 +578,8 @@ class Trainer(object):
             output = self.model(sample) # (bs, 1)
             loss = self.model.calculate_loss(output, label) # output: (bs, 1), label: (bs, 1)
             if (step + 1) % 10 == 0:
-                logging.info(f"Epoch {epoch_idx} Step {step + 1}/{total_batches} | loss: {loss.item():.4f}")
+                logging.info(f"Epoch {epoch_idx} Valid Step {step + 1}/{total_batches} | loss: {loss.item():.4f}")
+            # pbar.set_postfix(loss=loss.item())
             total_loss += loss.item()
             self._check_nan(loss)
 
@@ -600,8 +623,8 @@ class Trainer(object):
         if torch.isnan(loss).any():
             raise ValueError("Model diverged with loss = NaN")
         return
-
     
+#-----Main-----
 model = BGE_FTModel(bge_path).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 loss_fn = nn.BCELoss()
@@ -611,5 +634,3 @@ evaluator = Evaluator()
 result, result_str = trainer.eval(evaluator)
 
 print(result)
-
-
