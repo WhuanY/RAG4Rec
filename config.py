@@ -1,8 +1,6 @@
 import os
 import re
 import yaml
-import torch
-
 
 class Config(object):
     """ Configurator module that load the defined parameters.
@@ -62,6 +60,7 @@ class Config(object):
         use_gpu = self.params['use_gpu']
         if use_gpu:
             os.environ["CUDA_VISIBLE_DEVICES"] = str(self.params['gpu_id'])
+            import torch 
         self.params['device'] = torch.device("cuda" if torch.cuda.is_available() and use_gpu else "cpu")
 
     def __getitem__(self, item):

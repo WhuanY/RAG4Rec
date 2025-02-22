@@ -59,8 +59,11 @@ class Collator_PJFNN(Collator):
     """Collator for PJFNN model"""
     def __init__(self, config):
         super().__init__(config)
+        self.max_seq_len = config['max_seq_len']
+        self.max_item_num = 40 #TODO: assign an appropriate value
     
     def __call__(self, batch):
+        max_seq_len = self.max_seq_len
         geek_texts = [item['geek_texts'] for item in batch]
         job_texts = [item['job_texts'] for item in batch]
         labels = [item['label'] for item in batch]
@@ -73,20 +76,20 @@ class Collator_PJFNN(Collator):
         batch_job_encoded = []
 
         for geek_text, job_text in zip(geek_texts, job_texts):
-            geek_encoded = self.tokenizer(geek_text, padding="max_length", truncation=True, max_length=256)['input_ids'] # (geek_item, max_seq_len)
+            geek_encoded = self.tokenizer(geek_text, padding="max_length", truncation=True, max_length=max_seq_len)['input_ids'] # (geek_item, max_seq_len)
             geek_encoded = torch.tensor(geek_encoded, dtype=torch.int64)  # Convert to tensor
 
             if len(geek_text) < max_geek_items:
-                padding = torch.full((max_geek_items - len(geek_text), 256), self.tokenizer.pad_token_id, dtype=torch.int16) # (max_geek_item - geek_item, max_seq_len)
+                padding = torch.full((max_geek_items - len(geek_text), max_seq_len), self.tokenizer.pad_token_id, dtype=torch.int16) # (max_geek_item - geek_item, max_seq_len)
                 geek_encoded = torch.cat((geek_encoded, padding), dim=0) # (max_geek_items, max_seq_len)
 
             if len(job_text) == 0:
-                job_encoded = torch.full((max_job_items, 256), self.tokenizer.pad_token_id, dtype=torch.int16) # (max_job_items, max_seq_len)
+                job_encoded = torch.full((max_job_items, max_seq_len), self.tokenizer.pad_token_id, dtype=torch.int16) # (max_job_items, max_seq_len)
             else:
-                job_encoded = self.tokenizer(job_text, padding="max_length", truncation=True, max_length=256)['input_ids']
+                job_encoded = self.tokenizer(job_text, padding="max_length", truncation=True, max_length=max_seq_len)['input_ids']
                 job_encoded = torch.tensor(job_encoded, dtype=torch.int64) # (job_item, max_seq_len)
                 if len(job_text) < max_job_items:
-                    padding = torch.full((max_job_items - len(job_text), 256), self.tokenizer.pad_token_id, dtype=torch.int16)
+                    padding = torch.full((max_job_items - len(job_text), max_seq_len), self.tokenizer.pad_token_id, dtype=torch.int16)
                     job_encoded = torch.cat((job_encoded, padding), dim=0) # (max_job_items, max_seq_len)
             
             batch_geek_encoded.append(geek_encoded)
@@ -94,7 +97,7 @@ class Collator_PJFNN(Collator):
 
         return {
             "geek_texts": torch.stack(batch_geek_encoded), # (bs, max_geek_item, max_seq_len)
-            "job_texts": torch.stack(batch_job_encoded),    # (bs, max_geek_item, max_seq_len)
+            "job_texts": torch.stack(batch_job_encoded),    # (bs, max_job_item, max_seq_len)
             "labels": torch.tensor(labels) # (bs, 1)
         }
 

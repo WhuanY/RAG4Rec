@@ -3,6 +3,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from logging import getLogger
 from util import dict2device
+from tqdm import tqdm
 
 class Trainer(object):
     """The Trainer for training and evaluation strategies.
@@ -15,9 +16,6 @@ class Trainer(object):
     def __init__(self, config, model):
         self.config = config 
         self.model = model
-
-
-
         self.logger = getLogger()
         self.learner = config['learner'].lower()
         self.learning_rate = config['learning_rate']
@@ -50,6 +48,7 @@ class Trainer(object):
 
         for epoch_idx in range(self.start_epoch, self.epochs):
             # train
+            self.logger.info(f"Train Epoch {epoch_idx}/{self.epochs}")
             train_loss = self._train_epoch(epoch_idx, train_data) # mean loss of this epoch
             
             # valid
@@ -75,17 +74,13 @@ class Trainer(object):
         return best_valid
 
     @torch.no_grad()
-    def evaluate(self, eval_data):
+    def evaluate(self, eval_data, load_best_model=False):
         """Evaluate the model based on the eval data.
 
         Args:
             eval_data (DataLoader): the eval data
             load_best_model (bool, optional): whether load the best model in the training process, default: True.
                                               It should be set True, if users want to test the model after training.
-            model_file (str, optional): the saved model file, default: None. If users want to test the previously
-                                        trained model file, they can set this parameter.
-            save_score (bool): Save .score file to running dir if ``True``. Defaults to ``False``.
-            group (str): Which group to evaluate, can be ``all``, ``low``, ``high``.
 
         Returns:
             dict: eval result, key is the eval metric and value in the corresponding metric value
@@ -102,8 +97,6 @@ class Trainer(object):
         for batch_idx, batched_data in iter_data:
             interaction = batched_data
             scores = self.model.predict(dict2device(interaction, self.device))
-            i
-
             batch_matrix = self.evaluator.collect(interaction, scores)
             batch_matrix_list.append(batch_matrix)
         result, result_str = self.evaluator.evaluate(batch_matrix_list)
@@ -135,20 +128,22 @@ class Trainer(object):
         self.model.train()
         total_loss= 0
         total_batches = len(train_loader)
-
-        for step, sample in enumerate(train_loader):
+        for step, sample in tqdm(enumerate(train_loader), 
+                                 total= total_batches):
             sample = dict2device(sample, self.device)
-            label = sample['labels'].to(self.device) 
             self.optimizer.zero_grad()
-            
-            output = self.model(sample)
+            try:
+                output = self.model(sample)
+            except:
+                for k, v in sample.items():
+                    print(v.shape)
             loss = self.model.calculate_loss(output, sample)
+            total_loss += loss.item()
             loss.backward()
-            if self.clip_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
             self.optimizer.step()
-
-            return total_loss / total_batches
+        
+        self.logger.info(f"Train Epoch {epoch_idx} loss: {total_loss / total_batches}")
+        return total_loss / total_batches
 
     def _valid_epoch(self, epoch_idx:int, valid_loader: DataLoader):
         """Valid the model with valid data
