@@ -9,7 +9,8 @@ log/
 *.pyd
 *.pyw
 *.pyz
-BGE-FT.ipynb
+*.ipynb
+*.sh
 __pycache__/
 
 #vscode

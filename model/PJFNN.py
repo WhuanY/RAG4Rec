@@ -74,8 +74,8 @@ class Model_PJFNN(Model_PJF):
         pos = labels == 1
         neg = labels == 0
 
-        pos_loss = -torch.mean(sim[pos]).mean()
-        neg_loss = torch.mean(sim[neg]).mean()
+        pos_loss = -torch.mean(sim[pos]).mean() if pos.sum() > 0 else torch.tensor(0., device = sim.device) # edge case: no positive samples
+        neg_loss = torch.mean(sim[neg]).mean() if neg.sum() > 0 else torch.tensor(0., device = sim.device) # edge case: no negative samples
         l2_reg = torch.tensor(0., device = sim.device)
         for param in self.parameters():
             l2_reg += torch.norm(param)

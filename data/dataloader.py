@@ -60,10 +60,11 @@ class Collator_PJFNN(Collator):
     def __init__(self, config):
         super().__init__(config)
         self.max_seq_len = config['max_seq_len']
-        self.max_item_num = 40 #TODO: assign an appropriate value
     
     def __call__(self, batch):
         max_seq_len = self.max_seq_len
+        geek_id = [item["geek_id"] for item in batch]
+        job_id = [item["job_id"] for item in batch]
         geek_texts = [item['geek_texts'] for item in batch]
         job_texts = [item['job_texts'] for item in batch]
         labels = [item['label'] for item in batch]
@@ -96,6 +97,8 @@ class Collator_PJFNN(Collator):
             batch_job_encoded.append(job_encoded)
 
         return {
+            "geek_id": geek_id,
+            "job_id": job_id,
             "geek_texts": torch.stack(batch_geek_encoded), # (bs, max_geek_item, max_seq_len)
             "job_texts": torch.stack(batch_job_encoded),    # (bs, max_job_item, max_seq_len)
             "labels": torch.tensor(labels) # (bs, 1)

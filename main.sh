@@ -1,0 +1,1 @@
+nohup python main.py > output_pjfnn.log 2>&1 &

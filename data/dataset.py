@@ -41,6 +41,13 @@ class Dataset_PJF(Dataset):
                 self.job_ids.append(job_id)
                 self.labels.append([float(b), float(d), float(s)])
 
+        if self.config["ratio"]:
+            total_records = len(self.labels)
+            selected_records = int(total_records * self.config['ratio'])
+            self.geek_ids = self.geek_ids[:selected_records]
+            self.job_ids = self.job_ids[:selected_records]
+            self.labels = self.labels[:selected_records]
+        
     def __len__(self):
         return len(self.labels)
 
@@ -60,6 +67,8 @@ class Dataset_PJFNN(Dataset_PJF):
         job_id = self.job_ids[index]
         label = self.labels[index][0] # only use the first label
         return {
+            'geek_id': geek_id,
+            'job_id': job_id,
             'geek_texts': self.pool.get_texts("geek", geek_id), 
             'job_texts': self.pool.get_texts("job", job_id),
             'label': label

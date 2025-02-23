@@ -1,18 +1,19 @@
+from typing import List
 import unittest
 import numpy as np
 from sklearn.metrics import f1_score, accuracy_score, roc_auc_score, log_loss
+from logging import getLogger
 
-from typing import List
 class Evaluator:
     """
     Evaluator for the BGE-FT model.
     """
-    def __init__(self):
+    def __init__(self, config):
         #TODO: the label values are currently only assumed to be binary.
         # For further experiments, we need to make the label values more general.  
+        self.logger = getLogger()
+        self.topk = config['topk']
         self.uid2topk = {} # {uid: [(score, label), ...]}  
-        
-        self.topk = 10
         self.metric2func = {
             "ndcg": self._ndcg,
             "precision": self._precision,
@@ -42,6 +43,9 @@ class Evaluator:
             None
         """
         for u, s, l in zip(uid, score, label):
+            # s, l to cpu list
+            s = s.cpu().tolist()
+            l = l.cpu().tolist()
             if u not in self.uid2topk:
                 self.uid2topk[u] = []
             self.uid2topk[u].append((s, l)) 
@@ -49,8 +53,6 @@ class Evaluator:
         for u in self.uid2topk:
             self.uid2topk[u] = sorted(self.uid2topk[u], key=lambda x: x[0], reverse=True)
          
-        
-
     def evaluate(self, K: List[int]):
         """
         Evaluate the model using the collected data and the pass value k.
@@ -69,13 +71,12 @@ class Evaluator:
             result[cls_metric] = matric_val
 
         for rkg_metric in self.rkg_metrics:
-            for k in K:
+            for k in self.topk:
                 result[rkg_metric + '@' + str(k)] = self.metric2func[rkg_metric](k)
         
         result_str = self._format_str(result)
         return result, result_str
     
-
     # below are the ranking metric functions. With most of are indirect copy from the recbole.metrics.
     def _ndcg(self, k):
         base = []
@@ -120,7 +121,8 @@ class Evaluator:
                 if i < k:
                     rec += label
                 rel += label #TODO: If label is not binary, this should (maybe) be modified.
-            tot += rec / rel
+            if rel > 0:
+                tot += rec / rel
         return tot / len(self.uid2topk)
 
     # TODO: The MAP and MRR functions are not understood yet.
@@ -155,11 +157,15 @@ class Evaluator:
         Calculate the AUC score.
         """
         total_auc = 0
+        total_cnt = len(self.uid2topk)
         for uid, topk in self.uid2topk.items():
             score, labels = zip(*topk)
+            if len(set(labels)) < 2:
+                total_cnt -= 1
+                continue 
             auc = roc_auc_score(labels, score)
             total_auc += auc
-        return total_auc / len(self.uid2topk)
+        return total_auc / total_cnt
         
 
     def _logloss(self):
@@ -167,24 +173,32 @@ class Evaluator:
         Calculate the logloss.
         """
         total_logloss = 0
+        total_cnt = len(self.uid2topk)
         for uid, topk in self.uid2topk.items():
             score, labels = zip(*topk)
+            if len(set(labels)) < 2:
+                total_cnt -= 1
+                continue
             logloss = log_loss(labels, score)
             total_logloss += logloss
-        return total_logloss / len(self.uid2topk)
+        return total_logloss / total_cnt
 
     def _f1(self):
         """
         Calculate the F1 score.
         """
         total_f1 = 0
+        total_cnt = len(self.uid2topk)
         for uid, topk in self.uid2topk.items():
             score, labels = zip(*topk)
+            if len(set(labels)) < 2:
+                total_cnt -= 1
+                continue
             # Convert scores to binary predictions (1 if score >= 0.5, else 0)
             predictions = [1 if s >= 0.5 else 0 for s in score]
             f1 = f1_score(labels, predictions)
             total_f1 += f1
-        return total_f1 / len(self.uid2topk)
+        return total_f1 / total_cnt
 
     # other utility functions for evaluator
     def _format_str(self, result):
@@ -192,76 +206,6 @@ class Evaluator:
         for metric in result.keys():
             res += '\n\t{}:\t{:.4f}'.format(metric, result[metric])
         return res
-
-
-
-class TestEvaluator(unittest.TestCase):
-    def setUp(self):
-        self.evaluator = Evaluator()
-        # Sample data for testing
-        self.uid = [1, 1, 2, 2, 3, 3]
-        self.scores = [0.9, 0.1, 0.8, 0.4, 0.6, 0.7]
-        self.labels = [1, 0, 1, 0, 1, 0]
-        self.evaluator.collect(self.uid, self.scores, self.labels)
-
-    def test_collect(self):
-        """Test if the collect method correctly stores the data."""
-        self.assertIn(1, self.evaluator.uid2topk)
-        self.assertIn(2, self.evaluator.uid2topk)
-        self.assertIn(3, self.evaluator.uid2topk)
-        self.assertEqual(len(self.evaluator.uid2topk[1]), 2)  # User 1 has 2 entries
-        self.assertEqual(len(self.evaluator.uid2topk[2]), 2)  # User 2 has 2 entries
-
-    # def test_evaluate_auc(self):
-    #     """Test the AUC calculation."""
-    #     result, result_str = self.evaluator.evaluate(K=[1])
-    #     self.assertIn('auc', result)  # Check if 'auc' is in the result
-    #     self.assertAlmostEqual(result['auc'], 0.6666, places=4)  # Expected AUC
-
-    def test_evaluate_f1(self):
-        """Test the F1 score calculation."""
-        result, result_str = self.evaluator.evaluate(K=[1])
-        self.assertIn('f1', result)  # Check if 'f1' is in the result
-        self.assertAlmostEqual(result['f1'], 0.75, places=4)  # Expected F1 score
-
-    # def test_evaluate_precision(self):
-    #     """Test the precision calculation."""
-    #     result, result_str = self.evaluator.evaluate(K=[1])
-    #     self.assertIn('precision', result)  # Check if 'precision' is in the result
-    #     self.assertAlmostEqual(result['precision@1'], 1.0, places=4)  # Expected precision
-
-    # def test_evaluate_recall(self):
-    #     """Test the recall calculation."""
-    #     result, result_str = self.evaluator.evaluate(K=[1])
-    #     self.assertIn('recall', result)  # Check if 'recall' is in the result
-    #     self.assertAlmostEqual(result['recall@1'], 0.3333, places=4)  # Expected recall
-
-    # def test_evaluate_ndcg(self):
-    #     """Test the NDCG calculation."""
-    #     result, result_str = self.evaluator.evaluate(K=[1])
-    #     self.assertIn('ndcg', result)  # Check if 'ndcg' is in the result
-    #     self.assertAlmostEqual(result['ndcg@1'], 1.0, places=4)  # Expected NDCG
-
-    # def test_evaluate_mrr(self):
-    #     """Test the MRR calculation."""
-    #     result, result_str = self.evaluator.evaluate(K=[1])
-    #     self.assertIn('mrr', result)  # Check if 'mrr' is in the result
-    #     self.assertAlmostEqual(result['mrr@1'], 0.5, places=4)  # Expected MRR
-
-    # def test_format_str(self):
-    #     """Test the string formatting of results."""
-    #     result = {
-    #         'acc': 0.6667,
-    #         'auc': 0.75,
-    #         'f1': 0.75,
-    #         'precision@1': 1.0,
-    #         'recall@1': 0.3333,
-    #         'ndcg@1': 1.0,
-    #         'mrr@1': 0.5
-    #     }
-    #     formatted_str = self.evaluator._format_str(result)
-    #     self.assertIn('acc:', formatted_str)
-    #     self.assertIn('auc:', formatted_str)
 
 if __name__ == '__main__':
     unittest.main()

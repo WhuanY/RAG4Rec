@@ -5,6 +5,8 @@ from logging import getLogger
 from util import dict2device
 from tqdm import tqdm
 
+from evaluator import Evaluator
+
 class Trainer(object):
     """The Trainer for training and evaluation strategies.
 
@@ -21,12 +23,15 @@ class Trainer(object):
         self.learning_rate = config['learning_rate']
         self.epochs = config['epochs']
         self.eval_step = config['eval_step']
-        self.early_stopping_epochs = config['early_stopping_epochs']
+        self.stopping_steps = config['stopping_steps']
         self.clip_grad_norm = config['clip_grad_norm']
+        self.valid_matric = config['valid_metric']
         self.device = config['device']
         self.optimizer = self._build_optimizer()
+        self.evaluator = Evaluator(config)
 
         self.start_epoch = 0
+        self.verbose = True
 
     def train(self, train_data, valid_data):
         """Train the model based on the train data and the valid data.
@@ -41,7 +46,7 @@ class Trainer(object):
         Returns:
              (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
         """
-        train_loss = valid_loss = float('inf')
+        train_loss = valid_score = float('inf')
         # the below init values are for early stopping
         best_valid = cur_best_valid = float('inf')
         cur_step_from_best_val = 0
@@ -52,26 +57,27 @@ class Trainer(object):
             train_loss = self._train_epoch(epoch_idx, train_data) # mean loss of this epoch
             
             # valid
-            valid_loss = self._valid_epoch(epoch_idx, valid_data) # mean loss of this epoch
+            valid_score, valid_result = self._valid_epoch(epoch_idx, valid_data) # mean loss of this epoch
             if self.verbose:
-                self.logger.info(f"Epoch {epoch_idx} Train mean Loss: {train_loss:.4f}, Valid mean Loss: {valid_loss:.4f}")
+                self.logger.info(f"Epoch {epoch_idx} Train mean Loss: {train_loss:.4f}, Valid score: {valid_score:.4f}")
                 
             # early stopping
             if (epoch_idx + 1) % self.eval_step == 0:
                 if self.verbose:
                     self.logger.info(f"Epoch {epoch_idx + 1} starts early stopping check.")
                 cur_best_valid, cur_step_from_best_val, stop_flag, update_flag = self._early_stopping(
-                    valid_loss, cur_best_valid, cur_step_from_best_val, self.early_stopping_epochs, lower_is_better=True) # -> best, cur_step, stop_flag, update_flag
+                    valid_score, cur_best_valid, cur_step_from_best_val, self.stopping_steps, lower_is_better=True) # -> best, cur_step, stop_flag, update_flag
                 
                 if update_flag:
                     best_valid = cur_best_valid
+                    self.best_valid_result = valid_result
             
                 if stop_flag:
                     if self.verbose:
                         self.logger.info(f"Early stopping at epoch {epoch_idx}")
                     break
         
-        return best_valid
+        return best_valid, self.best_valid_result
 
     @torch.no_grad()
     def evaluate(self, eval_data, load_best_model=False):
@@ -94,10 +100,10 @@ class Trainer(object):
                 desc=f"Evaluate   ",
             )
         )
-        for batch_idx, batched_data in iter_data:
-            interaction = batched_data
-            scores = self.model.predict(dict2device(interaction, self.device))
-            batch_matrix = self.evaluator.collect(interaction, scores)
+        for batch_idx, interaction in iter_data:
+            scores = self.model.predict(dict2device(interaction, self.device)) # (bs)
+            uid, score, label = interaction['geek_id'], scores, interaction['labels']
+            batch_matrix = self.evaluator.collect(uid, score, label)
             batch_matrix_list.append(batch_matrix)
         result, result_str = self.evaluator.evaluate(batch_matrix_list)
 
@@ -132,11 +138,7 @@ class Trainer(object):
                                  total= total_batches):
             sample = dict2device(sample, self.device)
             self.optimizer.zero_grad()
-            try:
-                output = self.model(sample)
-            except:
-                for k, v in sample.items():
-                    print(v.shape)
+            output = self.model(sample)
             loss = self.model.calculate_loss(output, sample)
             total_loss += loss.item()
             loss.backward()
@@ -152,12 +154,11 @@ class Trainer(object):
             valid_data (DataLoader): the valid data.
 
         Returns:
-            float: valid score
-            dict: valid result
+            valid_score (float): the valid score
         """
         valid_result, valid_result_str = self.evaluate(valid_loader, load_best_model=False)
-        valid_score = valid_result[self.valid_metric]
-        return valid_score, valid_result, valid_result_str
+        valid_score = valid_result[self.valid_matric]
+        return valid_score, valid_result
 
     def _early_stopping(self, value, best, cur_step, max_step, lower_is_better=True):
         """validation-based early stopping
