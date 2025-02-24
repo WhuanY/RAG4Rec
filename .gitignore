@@ -2,6 +2,7 @@ dataset/
 sample_prepare_dataset/
 .SHPJF/
 log/
+*.log
 
 #python:
 *.pyc

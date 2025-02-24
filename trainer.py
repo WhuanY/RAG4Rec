@@ -24,12 +24,13 @@ class Trainer(object):
         self.epochs = config['epochs']
         self.eval_step = config['eval_step']
         self.stopping_steps = config['stopping_steps']
+        self.lower_is_better = config['lower_is_better']
         self.clip_grad_norm = config['clip_grad_norm']
         self.valid_matric = config['valid_metric']
         self.device = config['device']
         self.optimizer = self._build_optimizer()
         self.evaluator = Evaluator(config)
-
+        
         self.start_epoch = 0
         self.verbose = True
 
@@ -48,7 +49,7 @@ class Trainer(object):
         """
         train_loss = valid_score = float('inf')
         # the below init values are for early stopping
-        best_valid = cur_best_valid = float('inf')
+        best_valid = cur_best_valid = float('inf') if self.lower_is_better else float('-inf')
         cur_step_from_best_val = 0
 
         for epoch_idx in range(self.start_epoch, self.epochs):
@@ -66,7 +67,11 @@ class Trainer(object):
                 if self.verbose:
                     self.logger.info(f"Epoch {epoch_idx + 1} starts early stopping check.")
                 cur_best_valid, cur_step_from_best_val, stop_flag, update_flag = self._early_stopping(
-                    valid_score, cur_best_valid, cur_step_from_best_val, self.stopping_steps, lower_is_better=True) # -> best, cur_step, stop_flag, update_flag
+                    valid_score, 
+                    cur_best_valid, 
+                    cur_step_from_best_val, 
+                    self.stopping_steps, 
+                    self.lower_is_better) # -> best, cur_step, stop_flag, update_flag
                 
                 if update_flag:
                     best_valid = cur_best_valid
@@ -160,7 +165,7 @@ class Trainer(object):
         valid_score = valid_result[self.valid_matric]
         return valid_score, valid_result
 
-    def _early_stopping(self, value, best, cur_step, max_step, lower_is_better=True):
+    def _early_stopping(self, value, best, cur_step, max_step, lower_is_better):
         """validation-based early stopping
 
         Args:
@@ -183,7 +188,7 @@ class Trainer(object):
         stop_flag = False
         update_flag = False
 
-        better = value < best if lower_is_better else value > best
+        better = (value <= best if lower_is_better else value > best)
         if better:
             cur_step = 0
             best = value

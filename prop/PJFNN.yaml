@@ -1,6 +1,5 @@
 # Data
 tokenizer_path: "/media/wuyuhuan/bge-small-zh"
-ratio: 0.1
 
 # Model
 bge_path: "/media/wuyuhuan/bge-small-zh"

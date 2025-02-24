@@ -65,7 +65,7 @@ class Dataset_PJFNN(Dataset_PJF):
     def __getitem__(self, index):
         geek_id = self.geek_ids[index]
         job_id = self.job_ids[index]
-        label = self.labels[index][0] # only use the first label
+        label = self.labels[index][2] # control label, [0] for browsed, [1] for delivered, [2] for satisfied
         return {
             'geek_id': geek_id,
             'job_id': job_id,

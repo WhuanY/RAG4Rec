@@ -13,6 +13,7 @@ pos_weight: 8
 # Evaluation
 topk: [1,5,10]
 valid_metric: auc
+lower_is_better: False
 
 # DataLoader
 num_workers: 4
