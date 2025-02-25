@@ -4,7 +4,7 @@ gpu_id: 0
 
 # Training
 learner: Adam
-epochs: 300
+max_epochs: 300
 eval_step: 1
 stopping_steps: 5
 clip_grad_norm: ~
@@ -16,12 +16,12 @@ valid_metric: auc
 lower_is_better: False
 
 # DataLoader
-num_workers: 4
+num_workers: 8
 pin_memory: True
 
 # General
-ratio: 1 # the dataset ratio for loading. 1 means all data will be loaded.
-checkpoint_dir: ./saved/
+ratio: 0.01 # the dataset ratio for loading. 1 means all data will be loaded.
+checkpoint_dir: /data/model_checkpoints/
 dataset_path: ./dataset/
 loss_decimal_place: 4
 metric_decimal_place: 4

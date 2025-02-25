@@ -1,8 +1,9 @@
+import os
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from logging import getLogger
-from util import dict2device
+from util import ensure_dir, get_local_time, dict2device
 from tqdm import tqdm
 
 from evaluator import Evaluator
@@ -16,12 +17,14 @@ class Trainer(object):
     - `model` is the instantiated object of a Model Class.
     """
     def __init__(self, config, model):
-        self.config = config 
-        self.model = model
+        # overall attributes
         self.logger = getLogger()
+        self.config = config 
+        # train and evaluate
+        self.model = model
         self.learner = config['learner'].lower()
         self.learning_rate = config['learning_rate']
-        self.epochs = config['epochs']
+        self.max_epochs = config['max_epochs']
         self.eval_step = config['eval_step']
         self.stopping_steps = config['stopping_steps']
         self.lower_is_better = config['lower_is_better']
@@ -30,11 +33,14 @@ class Trainer(object):
         self.device = config['device']
         self.optimizer = self._build_optimizer()
         self.evaluator = Evaluator(config)
-        
+        # save and continue training
         self.start_epoch = 0
+        self.checkpoint_dir = config['checkpoint_dir']
+        self.best_model_path = None
+        # other
         self.verbose = True
 
-    def train(self, train_data, valid_data):
+    def train(self, train_data, valid_data, should_save=True):
         """Train the model based on the train data and the valid data.
 
         Args:
@@ -42,19 +48,20 @@ class Trainer(object):
             valid_data (DataLoader, optional): the valid data, default: None.
                                                If it's None, the early_stopping is invalid.
             verbose (bool, optional): whether to write training and evaluation information to logger, default: True
-            saved (bool, optional): whether to save the model parameters, default: True
+            should_save (bool, optional): whether to save the model parameters, default: True
 
         Returns:
              (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
         """
         train_loss = valid_score = float('inf')
         # the below init values are for early stopping
-        best_valid = cur_best_valid = float('inf') if self.lower_is_better else float('-inf')
+        self.best_valid_score = cur_best_valid_score = float('inf') if self.lower_is_better else float('-inf')
         cur_step_from_best_val = 0
 
-        for epoch_idx in range(self.start_epoch, self.epochs):
+        for epoch_idx in range(self.start_epoch, self.max_epochs):
+            self.cur_epoch = epoch_idx
             # train
-            self.logger.info(f"Train Epoch {epoch_idx}/{self.epochs}")
+            self.logger.info(f"Train Epoch {self.cur_epoch}/{self.max_epochs}")
             train_loss = self._train_epoch(epoch_idx, train_data) # mean loss of this epoch
             
             # valid
@@ -66,15 +73,17 @@ class Trainer(object):
             if (epoch_idx + 1) % self.eval_step == 0:
                 if self.verbose:
                     self.logger.info(f"Epoch {epoch_idx + 1} starts early stopping check.")
-                cur_best_valid, cur_step_from_best_val, stop_flag, update_flag = self._early_stopping(
+                cur_best_valid_score, cur_step_from_best_val, stop_flag, update_flag = self._early_stopping(
                     valid_score, 
-                    cur_best_valid, 
+                    cur_best_valid_score, 
                     cur_step_from_best_val, 
                     self.stopping_steps, 
                     self.lower_is_better) # -> best, cur_step, stop_flag, update_flag
                 
                 if update_flag:
-                    best_valid = cur_best_valid
+                    if should_save:
+                        self._save_checkpoint(epoch_idx)
+                    self.best_valid_score = cur_best_valid_score
                     self.best_valid_result = valid_result
             
                 if stop_flag:
@@ -82,7 +91,34 @@ class Trainer(object):
                         self.logger.info(f"Early stopping at epoch {epoch_idx}")
                     break
         
-        return best_valid, self.best_valid_result
+        return self.best_valid_score, self.best_valid_result
+    
+    def resume_checkpoint(self, resume_file):
+        """Load the model parameters information and training information.
+
+        Args:
+            resume_file (file): the checkpoint file
+        """
+        resume_file = str(resume_file)
+        checkpoint = torch.load(resume_file)
+        self.start_epoch = checkpoint['epoch'] + 1
+        self.cur_step = checkpoint['cur_step']
+        self.best_valid_score = checkpoint['best_valid_score']
+
+        # load architecture params from checkpoint
+        if checkpoint['config']['model'].lower() != self.config['model'].lower():
+            self.logger.warning('Architecture configuration given in config file is different from that of checkpoint. '
+                                'This may yield an exception while state_dict is being loaded.')
+        self.model.load_state_dict(checkpoint['state_dict'])
+
+        # load optimizer state from checkpoint only when optimizer type is not changed
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        message_output = 'Checkpoint loaded. Resume training from epoch {}'.format(self.start_epoch)
+        self.logger.info(message_output)
+
+    def _check_nan(self, loss):
+        if torch.isnan(loss):
+            raise ValueError('Training loss is nan')
 
     @torch.no_grad()
     def evaluate(self, eval_data, load_best_model=False):
@@ -114,6 +150,7 @@ class Trainer(object):
 
         return result, result_str
 
+    
     def _build_optimizer(self):
         """Init the Optimizer
 
@@ -198,6 +235,31 @@ class Trainer(object):
             if cur_step > max_step:
                 stop_flag = True
         return best, cur_step, stop_flag, update_flag
+    
+    def _save_checkpoint(self, epoch):
+        """Store the model parameters information and training information.
+
+        Args:
+            epoch (int): the current epoch id
+        """
+        ensure_dir(self.checkpoint_dir)
+        saved_model_filepath = os.path.join(self.checkpoint_dir, f'{self.config["model"]}-{get_local_time()}.pth')
+        
+        if self.best_model_path and os.path.exists(self.best_model_path):
+            os.remove(self.best_model_path)
+        
+        self.best_model_path = saved_model_filepath
+        
+        state = {
+            'config': self.config,
+            'epoch': epoch,
+            'cur_epoch': self.cur_epoch,
+            'best_valid_score': self.best_valid_score,
+            'state_dict': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+        }
+
+        torch.save(state, saved_model_filepath)
 
     def _check_nan(self, loss):
         if torch.isnan(loss).any():

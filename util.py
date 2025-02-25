@@ -67,8 +67,9 @@ def init_logger(config):
     fileformatter = logging.Formatter(filefmt, filedatefmt)
 
     sfmt = "%(asctime)-15s %(levelname)s %(message)s"
-    sdatefmt = "%d %b %H:%M"
+    sdatefmt = "%d %b %H:%M:%S"
     sformatter = logging.Formatter(sfmt, sdatefmt)
+    
     if config['state'] is None or config['state'].lower() == 'info':
         level = logging.INFO
     elif config['state'].lower() == 'debug':
@@ -119,7 +120,6 @@ def ensure_dir(dir_path):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
-
 def dict2device(data, device):
     for k, v in data.items():
         if isinstance(v, dict):
@@ -127,3 +127,6 @@ def dict2device(data, device):
         elif isinstance(v, torch.Tensor):
             data[k] = v.to(device)
     return data
+
+if __name__ == "__main__":
+    print(get_local_time())
